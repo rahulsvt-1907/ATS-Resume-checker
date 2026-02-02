@@ -1,104 +1,107 @@
-import streamlit as st
 import google.generativeai as genai
 import os
 import PyPDF2 as pdf
+import cv2
+import numpy as np
+from PIL import Image
 from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer, util
+import gender_guesser.detector as gender
+from colorthief import ColorThief
 
-load_dotenv()  # load all our environment variables
-
+# Load environment variables
+load_dotenv()
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
-# Database of Company Job Descriptions
-company_database = {
-    "Company1": "We are looking for a skilled software engineer with expertise in Python and Django...",
-    "Company2": "Join our data science team and work on exciting projects involving machine learning and data analysis...",
-    # We can add more companies and job descriptions
-}
+# Load AI models
+sentence_model = SentenceTransformer('paraphrase-MiniLM-L6-v2')
+gender_detector = gender.Detector()
 
-# Gemini Pro Response
-def get_gemini_response(input):
-    model = genai.GenerativeModel('gemini-pro')
-    response = model.generate_content(input)
-    return response.text
-
-def input_pdf_text(uploaded_file):
+def extract_text_from_pdf(uploaded_file):
     reader = pdf.PdfReader(uploaded_file)
-    text = ""
-    for page in range(len(reader.pages)):
-        page = reader.pages[page]
-        text += str(page.extract_text())
+    text = "".join([page.extract_text() or "" for page in reader.pages])
     return text
 
-# Function to Match Resume with Job Descriptions using Sentence-Transformers
-def match_resume_to_job(resume_text):
-    model = SentenceTransformer('paraphrase-MiniLM-L6-v2')
-    resume_embedding = model.encode(resume_text)
+def extract_dominant_color(image):
+    color_thief = ColorThief(image)
+    dominant_color = color_thief.get_color(quality=1)
+    return dominant_color
 
-    matched_companies = []
-    for company, job_description in company_database.items():
-        jd_embedding = model.encode(job_description)
-        similarity_score = util.pytorch_cos_sim(resume_embedding, jd_embedding)[0][0].item()
-        matched_companies.append({"company": company, "similarity_score": similarity_score * 100})
+def detect_gender_from_name(name):
+    return gender_detector.get_gender(name.split()[0])
 
-    return matched_companies
+def classify_face_shape(image):
+    # Placeholder function for face shape classification
+    return "Oval"  # To be replaced with an actual ML model
 
-# Function to Recommend Resume Improvements (Simple Keyword Matching)
-def recommend_resume_improvements(resume_text):
-    keywords_to_include = ["python", "data science", "machine learning"]  # Replace with your relevant keywords
+def analyze_image(image_file):
+    image = Image.open(image_file)
+    image_np = np.array(image)
+    face_shape = classify_face_shape(image_np)
+    dominant_color = extract_dominant_color(image_file)
+    return face_shape, dominant_color
 
-    missing_keywords = [keyword for keyword in keywords_to_include if keyword.lower() not in resume_text.lower()]
-    return missing_keywords
+def process_uploaded_file(uploaded_file, name):
+    if uploaded_file.type == "application/pdf":
+        user_text = extract_text_from_pdf(uploaded_file)
+        return None  # PDF processing not returning face details
+    else:
+        face_shape, skin_color = analyze_image(uploaded_file)
+        user_gender = detect_gender_from_name(name) if name else "Unknown"
+        return face_shape, skin_color, user_gender
 
-# Streamlit app
-st.title("Smart ATS")
-st.text("Improve Your Resume ATS")
-jd = st.text_area("Paste the Job Description")
-uploaded_file = st.file_uploader("Upload Your Resume", type="pdf", help="Please upload the pdf")
-submit = st.button("Submit")
-
-# Prompt Template
-input_prompt = """
-Hey Act Like a skilled or very experienced ATS (Application Tracking System)
-with a deep understanding of the tech field, software engineering, data science, data analyst,
-and big data engineering. Your task is to evaluate the resume based on the given job description.
-You must consider the job market is very competitive, and you should provide 
-the best assistance for improving the resumes. Assign the percentage Matching based 
-on JD and the missing keywords with high accuracy
-resume:{text}
-description:{jd}
-
-I want the response in one single string having the structure
-{{"JD Match":"%","MissingKeywords":[],"Profile Summary":""}}
-"""
-
-if submit:
-    if uploaded_file is not None:
-        # Extract text from PDF
-        text = input_pdf_text(uploaded_file)
-
-        # Match resume with job descriptions
-        matched_companies = match_resume_to_job(text)
-        st.subheader("Suitable Companies:")
-        for match in matched_companies:
-            st.write(f"{match['company']}: {match['similarity_score']:.2f}% match")
-
-        # Display company with the highest similarity
-        if matched_companies:
-            best_match = max(matched_companies, key=lambda x: x['similarity_score'])
-            st.subheader(f"Recommended Company: {best_match['company']} ({best_match['similarity_score']:.2f}% match)")
-
-        # Recommend resume improvements
-        recommended_improvements = recommend_resume_improvements(text)
-        st.subheader("Resume Recommendations:")
-        if recommended_improvements:
-            st.write("Add the following keywords to improve your resume:")
-            for improvement in recommended_improvements:
-                st.write(f"- {improvement}")
-        else:
-            st.write("Your resume is well-matched with the required keywords.")
-
-        # Generate response using Gemini Pro
-        response = get_gemini_response(input_prompt.format(text=text, jd=jd))
-        st.subheader("Gemini Pro Response:")
-        st.write(response)
+def get_fashion_recommendations(face_shape, skin_color, gender, occasion):
+    recommendations = {
+        "Oval": {
+            "Casual": ("Slim-fit jeans, V-neck shirts, sneakers, and a leather jacket.",
+                       "Messy textured haircut or medium-length waves.",
+                       "White sneakers or casual loafers."),
+            "Formal": ("Tailored suit, solid-color shirt, classic tie, and dress shoes.",
+                       "Slicked-back style or classic side-part.",
+                       "Oxford shoes or polished leather loafers.")
+        },
+        "Round": {
+            "Casual": ("Straight-leg pants, vertical stripe shirts, and open jackets.",
+                       "Pompadour or high-volume quiff.",
+                       "Chunky sneakers or desert boots."),
+            "Formal": ("Single-breasted blazers, structured suits, and subtle patterns.",
+                       "Side-swept undercut or comb-over.",
+                       "Monk strap shoes or classic derbies.")
+        },
+        "Square": {
+            "Casual": ("Fitted T-shirts, slim jeans, and bomber jackets.",
+                       "Textured crop or spiked hairstyle.",
+                       "Combat boots or stylish sneakers."),
+            "Formal": ("Double-breasted blazers, structured suits, and bold patterns.",
+                       "Side-part or slicked-back undercut.",
+                       "Chelsea boots or classic loafers.")
+        },
+        "Diamond": {
+            "Casual": ("Layered outfits, open collars, and fitted joggers.",
+                       "Fringe cut or side-swept bangs.",
+                       "High-top sneakers or leather sandals."),
+            "Formal": ("Tailored tuxedos, deep V-neck shirts, and statement accessories.",
+                       "Wavy textured style or slicked-back look.",
+                       "Oxford shoes or pointed dress shoes.")
+        },
+        "Triangle": {
+            "Casual": ("Wide-neck shirts, straight-cut pants, and oversized hoodies.",
+                       "Quiff or faux hawk.",
+                       "Sneakers or casual loafers."),
+            "Formal": ("Structured blazers, patterned ties, and fitted trousers.",
+                       "Classic short back and sides.",
+                       "Monk strap shoes or brogues.")
+        },
+        "Circle": {
+            "Casual": ("Vertical stripe shirts, dark jeans, and fitted jackets.",
+                       "High-volume top or comb-over.",
+                       "Casual sneakers or slip-ons."),
+            "Formal": ("Single-button suits, slim ties, and structured outfits.",
+                       "Classic side-part or pompadour.",
+                       "Formal derbies or monk straps.")
+        }
+    }
+    
+    outfit = recommendations.get(face_shape, {}).get(occasion, 
+                ("No recommendation available.", "No hairstyle recommendation available.", "No footwear recommendation available."))
+    return outfit
