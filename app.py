@@ -1,31 +1,55 @@
 import streamlit as st
-from app_extended_functionality import process_uploaded_file, get_fashion_recommendations
+import google.generativeai as genai
+import os
+import PyPDF2 as pdf
+from dotenv import load_dotenv
+import json
 
-st.title("Fashion Stylish AI")
-st.text("Get AI-powered outfit recommendations!")
+load_dotenv() ## load all our environment variables
 
-uploaded_file = st.file_uploader("Upload Your Fashion Preference Document (PDF or Image)", type=["pdf", "jpg", "png"])
-occasion = st.selectbox("Select the Occasion", ["Casual", "Formal", "Streetwear", "Ethinic"])
-name = st.text_input("Enter Your Name (Optional)")
-submit = st.button("Get Recommendations")
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
-if submit and uploaded_file:
-    user_features = process_uploaded_file(uploaded_file, name)
-    if user_features:
-        face_shape, skin_color, user_gender = user_features
-        
-        st.subheader("Detected Features:")
-        st.write(f"Face Shape: {face_shape}")
-        st.write(f"Skin Color: {skin_color}")
-        st.write(f"Gender: {user_gender}")
-        
-        recommendation, hairstyle, footwear = get_fashion_recommendations(face_shape, skin_color, user_gender, occasion)
-        
-        st.subheader("Recommended Outfit:")
-        st.write(recommendation)
-        
-        st.subheader("Recommended Hairstyle:")
-        st.write(hairstyle)
-        
-        st.subheader("Recommended Footwear:")
-        st.write(footwear)
+# Gemini Pro Response
+def get_gemini_repsonse(input):
+    model=genai.GenerativeModel('gemini-pro')
+    response=model.generate_content(input)
+    return response.text
+
+def input_pdf_text(uploaded_file): 
+    reader=pdf.PdfReader(uploaded_file)
+    text=""
+    for page in range(len(reader.pages)):
+        page=reader.pages[page]
+        text+=str(page.extract_text())
+    return text
+
+#Prompt Template
+
+input_prompt="""
+Hey Act Like a skilled or very experience ATS(Application Tracking System)
+with a deep understanding of tech field,software engineering,data science ,data analyst
+and big data engineer. Your task is to evaluate the resume based on the given job description.
+You must consider the job market is very competitive and you should provide 
+best assistance for improving the resumes. Assign the percentage Matching based 
+on Jd and
+the missing keywords with high accuracy
+resume:{text}
+description:{jd}
+
+I want the response in one single string having the structure
+{{"JD Match":"%","MissingKeywords:[]","Profile Summary":""}}
+"""
+
+## streamlit app
+st.title("Smart ATS")
+st.text("Improve Your Resume ATS")
+jd=st.text_area("Paste the Job Description")
+uploaded_file=st.file_uploader("Upload Your Resume",type="pdf",help="Please uplaod the pdf")
+
+submit = st.button("Submit")
+
+if submit:
+    if uploaded_file is not None:
+        text=input_pdf_text(uploaded_file)
+        response=get_gemini_repsonse(input_prompt)
+        st.subheader(response)
